@@ -122,7 +122,6 @@ class HNSW:
         ep, L = self._get_entry_point() # get entry point and layer of the entry point to HNSW graph
         mL = 1 / math.log(M)
         l = math.floor(-math.log(random.uniform(0, 1)) * mL)
-        print(l)
 
         # If the new node's level (l) is higher than the current highest layer (L),
         for i in range(L+1, l+1):
