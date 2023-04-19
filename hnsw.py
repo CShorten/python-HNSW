@@ -172,6 +172,7 @@ class HNSW:
 
     def _get_entry_point(self):
         top_layer = max(self.graph.keys())
+        # should we search here? Thinking probably yes
         entry_point = random.choice(list(self.graph[top_layer].keys()))
         return entry_point, top_layer
 
