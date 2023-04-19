@@ -10,6 +10,11 @@ import math
 
 class HNSW:
     def __init__(self, max_connections=16, max_layers=2, ef=16, efConstruction=16):
+        '''
+        Note on max_connections vs. efConstruction,
+        efConstruction - The HNSW build parameter that controls the quality of the search at build time.
+        maxConnections - The HNSW build parameter controls how many outgoing edges a node can have in the HNSW graph.
+        '''
         self.node_id_to_vector = {}
         '''
         dictionary mapping node ids to their respective vectors, e.g.
