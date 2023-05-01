@@ -9,7 +9,7 @@ import random
 import math
 
 class experimentalHNSW:
-    def __init__(self, max_connections=16, max_layers=2, ef=16, efConstruction=16):
+    def __init__(self, max_connections=16, max_layers=4, ef=16, efConstruction=16):
         self.node_id_to_vector = {}
         '''
         dictionary mapping node ids to their respective vectors, e.g.
@@ -58,15 +58,24 @@ class experimentalHNSW:
         
         return np.sqrt(np.sum((a_vector - b_vector)**2))
     
-    def _search_layer(self, q, ep, ef, layer_num):
+    def _search_layer(self, q, ep, ef, layer_num, query_filters=None):
         '''
         q:              tuple, query vector
         eps:            tuple, entry point (node ids)
         ef:             int, number of nearest to q elements to return
         layer_num:      int, layer number we are searching through (this is a hierarchical graph)
+        query_filters:  []int, query filters to match
         '''
+        if (type(q) == int):
+            # query id, look up filters and vector
+            query_filters = self.node_id_to_filters[q]
+            # no need to get the vector like this because it's built into the self._distance to look it up
+        
+        # else -- you passed in the query filters as an argument to _search_layer
+
         visited = {ep} # set of visited elements (v in paper)
         candidates = [(-self._distance(ep, q), ep)] # set of candidates (C in paper)
+        q_filters = self.node_id_to_filters[q]
         '''
         (negative distance between the entry point and query point, query point)
 
@@ -100,24 +109,27 @@ class experimentalHNSW:
                 break # all elements in the dynamic list of nearest neighbors have been evaluated
 
             for e in self.graph[layer_num][nearest_neighbor]:
-                if e not in visited:
-                    visited.add(e)
-                    distance_e = self._distance(e, q)
-                    furthest_distance_to_query, furthest_neighbor = heapq.heappop(dynamic_nearest_neighbors_list)
-                    heapq.heappush(dynamic_nearest_neighbors_list, (furthest_distance_to_query, furthest_neighbor))
-                    
-                    if distance_e < -(furthest_distance_to_query) or len(dynamic_nearest_neighbors_list) < ef:
-                        heapq.heappush(candidates, (-distance_e, e))
-                        heapq.heappush(dynamic_nearest_neighbors_list, (-distance_e, e))
-                        if len(dynamic_nearest_neighbors_list) > ef:
-                            heapq.heappop(dynamic_nearest_neighbors_list)
+                # ADD FILTER CHECK FOR ALLOW LIST
+                if set(self.node_id_to_filters[e]).issubset(query_filters):
+                    if e not in visited:
+                        visited.add(e)
+                        distance_e = self._distance(e, q)
+                        furthest_distance_to_query, furthest_neighbor = heapq.heappop(dynamic_nearest_neighbors_list)
+                        heapq.heappush(dynamic_nearest_neighbors_list, (furthest_distance_to_query, furthest_neighbor))
+                        
+                        if distance_e < -(furthest_distance_to_query) or len(dynamic_nearest_neighbors_list) < ef:
+                            heapq.heappush(candidates, (-distance_e, e))
+                            heapq.heappush(dynamic_nearest_neighbors_list, (-distance_e, e))
+                            if len(dynamic_nearest_neighbors_list) > ef:
+                                heapq.heappop(dynamic_nearest_neighbors_list)
             
         return [neighbor for dist, neighbor in sorted(dynamic_nearest_neighbors_list)]
 
-    def _insert_node(self, q_id, q, M, M_max, efConstruction, q_filters):
+    def _insert_node(self, q_id, q, q_filters, M, M_max, efConstruction):
         '''
         q_id:           int     -- new node id when inserting query into graph
         q:              []int   -- query vector
+        q_filters:      []int   -- query filters
         M:              int     -- number of established connections
         M[max]:         int     -- max number of connections for each element per layer
         efConstruction: int     -- size of the dynamic candidate list
@@ -133,6 +145,7 @@ class experimentalHNSW:
         nearest_neighbors = [] # list for the currently found nearest elements
         ep, L = self._get_entry_point() # get entry point and layer of the entry point to HNSW graph
         mL = 1 / math.log(M)
+        print(mL)
         l = math.floor(-math.log(random.uniform(0, 1)) * mL)
         print(l)
 
@@ -287,18 +300,20 @@ class experimentalHNSW:
                 R.append(e)
             else:
                 flag = True
-                print(self.node_id_to_filters[e])
+                '''
                 e_filters = set(self.node_id_to_filters[e])
                 query_filters = set(self.node_id_to_filters[q_id])
+                '''
                 for candidate in R:
                     
                     # if F[p'] intersect F[p] is not a subset of F[p*] then continue
                     # p* is our e, min distance golden child
         
+                    '''
                     candidate_filters = set(self.node_id_to_filters[candidate])
                     if candidate_filters.intersection(query_filters).issubset(e_filters) == False:
                         break
-
+                    '''
 
                     if (self._distance(q_id, e) > self._distance(q_id, candidate)):
                         flag = False

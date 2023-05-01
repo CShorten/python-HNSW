@@ -35,9 +35,11 @@ class HNSW:
         }
         '''
         self.max_connections = max_connections # how many outgoing edges a node can have in the HNSW graph
+        self.layer_zero_max_connections = max_connections * 2
         self.max_layers = max_layers # max depth of the hierarchy
         self.ef = ef # query time parameter for quality of search
         self.efConstruction = efConstruction # HNSW build parameter controls quality of search at build time
+        self.entry_point = 0 # the first node inserted will always be the entry point, 0 is a placeholder
     
     def _distance(self, a, b):
         if type(a) == int: # distance with query_id
@@ -50,14 +52,14 @@ class HNSW:
         else: # distance with query vector directly
             b_vector = np.array(b)
         
-        return np.sqrt(np.sum((a_vector - b_vector)**2))
+        return np.linalg.norm(a_vector - b_vector)
     
     def _search_layer(self, q, ep, ef, layer_num):
         '''
-        q:              tuple, query vector
-        eps:            tuple, entry point (node ids)
-        ef:             int, number of nearest to q elements to return
-        layer_num:      int, layer number we are searching through (this is a hierarchical graph)
+        q:              tuple,      query vector
+        eps:            tuple,      entry point (node ids)
+        ef:             int,        number of nearest to q elements to return
+        layer_num:      int,        layer number we are searching through (this is a hierarchical graph)
         '''
         visited = {ep} # set of visited elements (v in paper)
         candidates = [(-self._distance(ep, q), ep)] # set of candidates (C in paper)
@@ -108,7 +110,7 @@ class HNSW:
             
         return [neighbor for dist, neighbor in sorted(dynamic_nearest_neighbors_list)]
 
-    def _insert_node(self, q_id, q, M, M_max, efConstruction):
+    def _insert_node(self, q_id, q):
         '''
         q_id:           int     -- new node id when inserting query into graph
         q:              []int   -- query vector
@@ -119,28 +121,31 @@ class HNSW:
         self.node_id_to_vector[q_id] = q # always going to be adding this node to the graph
 
         if not self.graph: # case when inserting first node into the graph
-            self.graph[0] = {q_id: []}
+            l = self.max_layers
+            for init_layer in range(0, l+1):
+                self.graph[init_layer] = {q_id: []}
+            self.entry_point = q_id
             return
         
         nearest_neighbors = [] # list for the currently found nearest elements
-        ep, L = self._get_entry_point() # get entry point and layer of the entry point to HNSW graph
-        mL = 1 / math.log(M)
+        ep, L = self.entry_point, self.max_layers # get entry point and layer of the entry point to HNSW graph
+        mL = 1 / math.log(self.max_connections)
         l = math.floor(-math.log(random.uniform(0, 1)) * mL)
-        print(l)
 
-        # If the new node's level (l) is higher than the current highest layer (L),
-        for i in range(L+1, l+1):
-            self.graph[i] = {q_id: []}
-
-        # Find the new entry point for layers L down to l+1
+        # Find the entry point from the max layer down to l+1
         for lc in range(L, l + 1, -1):
-            nearest_neighbors = self._search_layer(q_id, ep, efConstruction, lc)
+            nearest_neighbors = self._search_layer(q_id, ep, self.efConstruction, lc)
             ep = nearest_neighbors[0] # check this
 
         # insert the new element and update connections for layers min(L, 1) down to 0
         for lc in range(min(L, l), -1, -1):
-            nearest_neighbors = self._search_layer(q_id, ep, efConstruction, lc)
-            neighbors_to_add = self._select_neighbors_heuristic(q_id, nearest_neighbors, M, lc)
+            nearest_neighbors = self._search_layer(q_id, ep, self.efConstruction, lc)
+            if lc == 0:
+                neighbors_to_add = self._select_neighbors_heuristic(q_id, nearest_neighbors, 
+                                                                    self.layer_zero_max_connections, lc)
+            else:
+                neighbors_to_add = self._select_neighbors_heuristic(q_id, nearest_neighbors, 
+                                                                    self.max_connections, lc)
 
             # add bidrectional connections from neighbors to q at layer lc
             self._add_bidirectional_connections(q_id, neighbors_to_add, lc)
@@ -148,15 +153,16 @@ class HNSW:
             # shrink connections if needed
             for e in neighbors_to_add:
                 e_conn = self.graph[lc][e]
-                if len(e_conn) > M_max:
-                    e_new_conn = self._select_neighbors_heuristic(e, e_conn, M_max, lc)
+                if len(e_conn) > self.max_connections:
+                    if lc == 0:
+                        e_new_conn = self._select_neighbors_heuristic(e, e_conn, 
+                                                                      self.layer_zero_max_connections, lc)
+                    else:
+                        e_new_conn = self._select_neighbors_heuristic(e, e_conn, 
+                                                                      self.max_connections, lc)
                     self.graph[lc][e] = e_new_conn
             
             ep = nearest_neighbors[0] if nearest_neighbors else ep # check this
-        
-        # update the entry point if necessary
-        if l > L:
-            self.graph[l] = {q_id: []}
 
     def _add_bidirectional_connections(self, q_id, neighbors_to_add, lc):
         # Add q as a neighbor to each of the nodes in neighbors_to_add at level lc
@@ -169,12 +175,6 @@ class HNSW:
         if q_id not in self.graph[lc]:
             self.graph[lc][q_id] = []
         self.graph[lc][q_id].extend(neighbors_to_add)
-
-    def _get_entry_point(self):
-        top_layer = max(self.graph.keys())
-        # should we search here? Thinking probably yes
-        entry_point = random.choice(list(self.graph[top_layer].keys()))
-        return entry_point, top_layer
 
     def _select_neighbors_simple(self, q_id, C, M):
         '''
@@ -204,44 +204,44 @@ class HNSW:
         '''
 
         R = []  # result set
-        W = list(C)  # working queue for the candidates
+        W = [(self._distance(q_id, e), e) for e in C]  # working queue for the candidates
+        heapq.heapify(W)  # convert W to a min-heap based on distance to the query
 
         # Extend candidates by their neighbors
         if extendCandidates:
             for e in C:
                 for e_adj in self.graph[lc].get(tuple(e), []):
                     if e_adj not in W:
-                        W.append(e_adj)
+                        heapq.heappush(W, self._distance(q_id, e_adj))
 
         W_discarded = []  # queue for the discarded candidates
 
-        while W and len(R) < M:
-            # Fidn the point in the working list with the smallest distance
-            e = min(W, key=lambda x: self._distance(q_id, x))
-            # remvoe the point as we are about to explore it
-            W.remove(e)
+        while len(W) > 0 and len(R) < M:
+            # Find the point in the working list with the smallest distance
+            # and remove it, we are about to explore it.
+            dist_e, e = heapq.heappop(W)
 
             # If the result list R is empty OR
             # If the distance between the query and e is less than 
             if len(R) == 0:
                 R.append(e)
-            else:
-                flag = True
-                for candidate in R:
-                    if (self._distance(q_id, e) > self._distance(q_id, candidate)):
-                        flag = False
-                        break
 
-                if(flag):
-                    R.append(e)
-                else:
-                    W_discarded.append(e)
+            flag = True
+            for candidate in R:
+                # is this correct?
+                if (dist_e < self._distance(q_id, candidate)):
+                    flag = False
+                    break
+
+            if(flag):
+                R.append(e)
+            else:
+                heapq.heappush(W_discarded, (dist_e, e))
 
         # Add some of the discarded connections from W_discarded
         if keepPrunedConnections:
             while len(W_discarded) > 0 and len(R) < M:
-                e = min(W_discarded, key=lambda x: self._distance(q_id, x))
-                W_discarded.remove(e)
+                dist_e, e = heapq.heappop(W_discarded)
                 R.append(e)
 
         return R
@@ -267,7 +267,7 @@ class HNSW:
         '''
 
         W = []  # set for the current nearest elements
-        ep, L = self._get_entry_point()  # entry point
+        ep, L = self.entry_point, self.max_layers
 
         # Traverse from top layer to layer 1
         for lc in range(L, 0, -1):

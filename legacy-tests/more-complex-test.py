@@ -1,6 +1,6 @@
 import numpy as np
 from hnsw import HNSW
-from filteredrobustprune import experimentalHNSW
+#from filteredrobustprune import experimentalHNSW
 import matplotlib.pyplot as plt
 import networkx as nx
 import random
@@ -15,8 +15,8 @@ def generate_random_points(num_points):
     return points, ids, labels
 
 def construct_graph(num_points, points, ids, labels=None):
-    M = 32
-    M_max = 32
+    M = 8
+    M_max = 8
     efConstruction = 32
     ef = 16
 
@@ -25,8 +25,8 @@ def construct_graph(num_points, points, ids, labels=None):
 
     for i, point in enumerate(points):
         print(f"Inserting node... {ids[i]}")
-        hnsw._insert_node(ids[i], point, M, M_max, efConstruction)
-        #hnsw._insert_node(ids[i], point, M, M_max, efConstruction, labels[i])
+        #hnsw._insert_node(ids[i], point, labels[i], M, M_max, efConstruction)
+        hnsw._insert_node(ids[i], point, M, M_max, efConstruction, labels[i])
         hnsw._pretty_print_graph()
 
     return hnsw.graph[0]
@@ -38,6 +38,7 @@ def plot_points(x, y, ids, point_colors, graph):
     for i, txt in enumerate(ids):
         ax.annotate(txt, (x[i], y[i]), fontsize=15)
 
+    '''
     for id, neighbors in graph.items():
         id_x = x[id]
         id_y = y[id]
@@ -45,6 +46,7 @@ def plot_points(x, y, ids, point_colors, graph):
             neighbor_x = x[neighbor]
             neighbor_y = y[neighbor]
             plt.plot([id_x, neighbor_x], [id_y, neighbor_y], linestyle='-', marker='o')
+    '''
     
     ax.set_xlim([0, 20])
     ax.set_ylim([0, 20])
@@ -95,15 +97,15 @@ def test_hnsw():
     colors = ['r', 'g', 'b', 'c', 'm', 'y']
     point_colors = [colors[label] for label in labels]
 
-    layer_zero_graph = construct_graph(num_points, points, ids)
+    layer_zero_graph = construct_graph(num_points, points, ids, labels)
     #layer_zero_graph = construct_graph(num_points, points, ids, labels)
 
     #print(layer_zero_graph)
-    nodes_to_check = [x for x in range(50) if x % 6 == 1]
-    print(analyze_graph(layer_zero_graph, nodes_to_check))
+    #nodes_to_check = [x for x in range(50) if x % 6 == 1]
+    #print(analyze_graph(layer_zero_graph, nodes_to_check))
 
-    #plot_graph(layer_zero_graph)
-    plot_points(points[:, 0], points[:, 1], ids, point_colors, layer_zero_graph)
+    plot_graph(layer_zero_graph)
+    #plot_points(points[:, 0], points[:, 1], ids, point_colors, layer_zero_graph)
 
 if __name__ == "__main__":
     test_hnsw()
