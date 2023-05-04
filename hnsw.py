@@ -107,7 +107,8 @@ class HNSW:
                         heapq.heappush(dynamic_nearest_neighbors_list, (-distance_e, e))
                         if len(dynamic_nearest_neighbors_list) > ef:
                             heapq.heappop(dynamic_nearest_neighbors_list)
-            
+        
+        # might not need to sort this list in construction time
         return [neighbor for dist, neighbor in sorted(dynamic_nearest_neighbors_list)]
 
     def _insert_node(self, q_id, q):
